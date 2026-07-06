@@ -64,3 +64,48 @@ test("ffprobeDuration returns NaN when neither ffprobe nor ffmpeg resolve", () =
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+import { synthesizeHeygen, synthResult } from "./tts.mjs";
+
+test("synthesizeHeygen surfaces a thrown HTTP error (e.g. 402) instead of swallowing it", async () => {
+  const res = await synthesizeHeygen(
+    { text: "hi", voiceId: "v1", lang: "en", speed: 1, wavAbs: "/tmp/x.wav" },
+    {
+      heygenAuthHeaders: () => ({}),
+      heygenJSON: async () => {
+        throw new Error("HeyGen POST /voices/speech → HTTP 402\nplan_upgrade_required");
+      },
+    },
+  );
+  assert.equal(res.ok, false);
+  assert.match(res.error, /402/);
+  assert.match(res.error, /plan_upgrade_required/);
+});
+
+test("synthesizeHeygen surfaces a failed audio_url fetch with its status", async () => {
+  const res = await synthesizeHeygen(
+    { text: "hi", voiceId: "v1", lang: "en", speed: 1, wavAbs: "/tmp/x.wav" },
+    {
+      heygenAuthHeaders: () => ({}),
+      heygenJSON: async () => ({ data: { audio_url: "http://audio.example/x" } }),
+      fetch: async () => ({ ok: false, status: 403 }),
+    },
+  );
+  assert.equal(res.ok, false);
+  assert.match(res.error, /HTTP 403/);
+});
+
+test("synthesizeHeygen reports a missing audio_url", async () => {
+  const res = await synthesizeHeygen(
+    { text: "hi", voiceId: "v1", lang: "en", speed: 1, wavAbs: "/tmp/x.wav" },
+    { heygenAuthHeaders: () => ({}), heygenJSON: async () => ({}) },
+  );
+  assert.equal(res.ok, false);
+  assert.match(res.error, /no audio_url/);
+});
+
+test("synthResult names a non-zero subprocess exit", () => {
+  const res = synthResult({ status: 2 }, "/tmp/none.wav", "kokoro (npx hyperframes tts)");
+  assert.equal(res.ok, false);
+  assert.match(res.error, /kokoro .* exited with status 2/);
+});
